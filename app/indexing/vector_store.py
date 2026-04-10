@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
@@ -47,17 +48,30 @@ class VectorStore:
         return self.index_dir / "docs.jsonl"
 
     def save(self) -> None:
-        faiss.write_index(self.index, str(self.faiss_path))
-        with self.docs_path.open("w", encoding="utf-8") as f:
-            for doc in self._docs:
-                f.write(
-                    json.dumps({
-                        "doc_id": doc.doc_id,
-                        "text": doc.text,
-                        "metadata": doc.metadata,
-                    })
-                    + "\n"
-                )
+        """Write through temp files and `os.replace` to reduce torn reads on crash."""
+
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+        pid = os.getpid()
+        tmp_faiss = self.index_dir / f".index.faiss.{pid}.tmp"
+        tmp_docs = self.index_dir / f".docs.jsonl.{pid}.tmp"
+        try:
+            faiss.write_index(self.index, str(tmp_faiss))
+            with tmp_docs.open("w", encoding="utf-8") as f:
+                for doc in self._docs:
+                    f.write(
+                        json.dumps({
+                            "doc_id": doc.doc_id,
+                            "text": doc.text,
+                            "metadata": doc.metadata,
+                        })
+                        + "\n"
+                    )
+            os.replace(tmp_docs, self.docs_path)
+            os.replace(tmp_faiss, self.faiss_path)
+        except BaseException:
+            tmp_faiss.unlink(missing_ok=True)
+            tmp_docs.unlink(missing_ok=True)
+            raise
 
     @classmethod
     def load(cls, model_name: str, index_dir: Path) -> "VectorStore":
@@ -71,6 +85,14 @@ class VectorStore:
                     obj = json.loads(line)
                     docs.append(Document(**obj))
             store._docs = docs
+        if store.faiss_path.exists() and store.docs_path.exists() and store._docs:
+            n_index = int(store.index.ntotal)
+            n_docs = len(store._docs)
+            if n_index != n_docs:
+                raise ValueError(
+                    f"Index vector count ({n_index}) does not match docs.jsonl rows ({n_docs}); "
+                    "refuse to load inconsistent store"
+                )
         return store
 
     # ------------------------------ Indexing ---------------------------- #
@@ -96,9 +118,14 @@ class VectorStore:
         self.add_documents(documents)
 
     # ------------------------------ Search ------------------------------ #
-    def search(self, query: str, top_k: int = 10) -> List[Tuple[float, Document]]:
+    def search_candidates(self, query: str, retrieve_k: int) -> List[Tuple[float, Document]]:
+        """Return up to `retrieve_k` nearest neighbors by embedding similarity."""
+
+        if not self._docs:
+            return []
+        k = min(max(1, retrieve_k), len(self._docs))
         query_vec = self._encode([query])
-        scores, ids = self.index.search(query_vec, top_k)
+        scores, ids = self.index.search(query_vec, k)
         results: List[Tuple[float, Document]] = []
         for score, idx in zip(scores[0], ids[0]):
             if idx == -1:
@@ -106,5 +133,8 @@ class VectorStore:
             doc = self._docs[int(idx)]
             results.append((float(score), doc))
         return results
+
+    def search(self, query: str, top_k: int = 10) -> List[Tuple[float, Document]]:
+        return self.search_candidates(query, top_k)
 
 
