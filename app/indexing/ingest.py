@@ -77,15 +77,35 @@ def parse_jsonl_events(file_path: Path) -> List[Dict]:
 
 
 def documents_from_events(events: Iterable[Dict], grouping: str = "actorname") -> List[Document]:
-    # Aggregate events by grouping key
-    grouped: Dict[str, List[str]] = defaultdict(list)
+    """Aggregate raw events into one `Document` per grouping key.
+
+    Metadata includes coarse time bounds when timestamps are present on events,
+    which enables server-side filtering during retrieval without re-parsing JSONL.
+    """
+
+    grouped_lines: Dict[str, List[str]] = defaultdict(list)
+    grouped_ts: Dict[str, List[str]] = defaultdict(list)
+
     for e in events:
-        grouped[str(e.get(grouping, "unknown"))].append(_format_event(e))
+        key = str(e.get(grouping, "unknown"))
+        grouped_lines[key].append(_format_event(e))
+        ts = e.get("timestamp")
+        if ts is not None:
+            grouped_ts[key].append(str(ts))
 
     documents: List[Document] = []
-    for key, sentences in grouped.items():
+    for key, sentences in grouped_lines.items():
         text = ". ".join(sorted(set(sentences)))
-        metadata = {"group": grouping, "key": key, "num_events": len(sentences)}
+        ts_list = grouped_ts.get(key, [])
+        first_ts = min(ts_list) if ts_list else None
+        last_ts = max(ts_list) if ts_list else None
+        metadata = {
+            "group": grouping,
+            "key": key,
+            "num_events": len(sentences),
+            "first_timestamp": first_ts,
+            "last_timestamp": last_ts,
+        }
         documents.append(Document(doc_id=key, text=text, metadata=metadata))
     return documents
 
