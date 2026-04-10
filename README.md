@@ -27,10 +27,12 @@ This project provides an end-to-end workflow for Security Operations Centers:
 ### ✨ Key Features
 
 - 🔎 **High-quality retrieval**: Sentence-Transformers + FAISS (inner-product, normalized)
+- 🎯 **Smart retrieval layer**: widen FAISS `retrieve_k`, optional metadata filters, IOC overlap narrowing, and cross-encoder reranking before summarization
 - 🧠 **LLM contextualization**: Transformers summarization pipeline with SOC-specific prompt
 - ⚙️ **Configurable**: All knobs via `app/config.py` or environment variables
 - 🧪 **Finetune-ready**: LoRA training pipeline for LLaMA 3 SFT classification
 - 📈 **Reporting**: Weekly HTML KPI report from triage logs
+- ✅ **Tests**: Pytest coverage for filters, persistence, retrieval, rerank, and API wiring
 
 ## 🏗️ Architecture
 
@@ -81,11 +83,28 @@ Optional flags:
 - `--grouping actorname` (default)
 - `--embedding-model sentence-transformers/all-MiniLM-L6-v2`
 
+### 2b) Append new logs to an existing index
+
+```bash
+PYTHONPATH=$(pwd) python scripts/append_index.py /path/to/new_batch.jsonl --index-dir indexes/default
+```
+
+Use `--dry-run` to count documents without writing. The embedding model must match the original index.
+
 ### 3) Search the index
 
 ```bash
 PYTHONPATH=$(pwd) python scripts/search.py "svchost suspicious access" --top-k 10
 ```
+
+### 3b) Advanced search (filters + optional rerank)
+
+```bash
+PYTHONPATH=$(pwd) python scripts/advanced_search.py "beacon 203.0.113.50" \
+  --top-k 5 --retrieve-k 20 --min-events 2 --ioc-narrow --json
+```
+
+Add `--rerank` to run the cross-encoder (downloads weights on first use).
 
 ### 4) Contextualize an alert
 
@@ -105,9 +124,11 @@ Then visit `http://localhost:8000/docs`.
 ## 🔌 API Endpoints
 
 - `GET /healthz` — health check
-- `POST /search` → `[ { score, doc_id, text, metadata } ]`
-- `POST /contextualize` → `{ brief, num_context }`
-- `POST /triage` → `{ alert, brief, search_results }`
+- `POST /search` → `[ { score, doc_id, text, metadata } ]`  
+  Optional JSON fields (all optional, backward compatible): `retrieve_k`, `filters` (metadata / score / time bounds), `use_rerank`, `narrow_by_ioc_overlap`
+- `POST /search/advanced` — same body and response as `/search` (explicit alias for tooling)
+- `POST /contextualize` → `{ brief, num_context, rerank }`
+- `POST /triage` → `{ alert, brief, search_results, rerank }`
 
 ## ⚙️ Configuration (`app/config.py`)
 
@@ -115,9 +136,18 @@ Override via env vars or `.env` file.
 
 - **Paths**: `data_dir`, `index_dir`
 - **Embeddings**: `embedding_model_name`, `search_top_k`
+- **Retrieval**: `retrieve_multiplier`, `retrieve_max_candidates`, `rerank_enabled`, `rerank_model_name`
 - **API**: `api_host`, `api_port`
 - **Contextualizer**: `summarizer_model_name`
 - **Finetune**: `llama_base_model`, `lora_output_dir`, `hf_token`
+
+## 🧪 Tests
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+PYTHONPATH=$(pwd) pytest
+```
 
 ## 🧪 LoRA Finetuning (optional)
 
@@ -149,8 +179,11 @@ app/
   indexing/
     ingest.py            # Parse JSONL logs -> documents
     vector_store.py      # FAISS vector store
+    search_filters.py    # Post-retrieval filters + lightweight IOC parsing
   llm/
     contextualize.py     # Summarization for alert context
+    rerank.py            # Cross-encoder reranker (lazy-loaded)
+    retrieval.py         # Retrieval pipeline orchestration
   finetune/
     dataset.py           # Threat dataset loader -> SFT mapping
     train_lora.py        # LoRA finetuning CLI
@@ -158,8 +191,11 @@ app/
     weekly.py            # KPI report generator
 scripts/
   build_index.py         # Build the FAISS index
+  append_index.py        # Append documents to an existing index
   search.py              # Query the index
+  advanced_search.py     # Filters, wide retrieval, optional rerank
   contextualize.py       # Retrieval + summarization CLI
   generate_weekly_report.py  # Render weekly HTML report
   serve_api.sh           # Run API server
+tests/                   # Pytest suite (filters, store, retrieval, API)
 ```
