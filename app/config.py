@@ -26,6 +26,24 @@ class Settings(BaseSettings):
         description="Sentence-Transformers model for embeddings",
     )
     search_top_k: int = 20
+    retrieve_multiplier: int = Field(
+        default=4,
+        ge=1,
+        description="FAISS retrieve_k is at least top_k * multiplier before filters/rerank",
+    )
+    retrieve_max_candidates: int = Field(
+        default=200,
+        ge=0,
+        description="Cap on FAISS candidates (0 disables the cap)",
+    )
+    rerank_enabled: bool = Field(
+        default=False,
+        description="When true, contextualize/triage/advanced search rerank by default",
+    )
+    rerank_model_name: str = Field(
+        default="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description="sentence-transformers CrossEncoder model id",
+    )
 
     # API
     api_host: str = "0.0.0.0"
