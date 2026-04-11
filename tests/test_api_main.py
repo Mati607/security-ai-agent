@@ -6,6 +6,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from app.cases.service import CaseInvestigationService
+from app.cases.store import CaseStore
 from app.config import Settings
 from app.llm.retrieval import build_default_pipeline
 
@@ -20,7 +22,7 @@ def _fake_summarization_pipeline(*_args: Any, **_kwargs: Any):
 
 
 @pytest.fixture()
-def api_client(vector_store_with_docs, tmp_index_dir, monkeypatch):
+def api_client(vector_store_with_docs, tmp_index_dir, tmp_path, monkeypatch):
     monkeypatch.setattr(
         "app.llm.contextualize.pipeline",
         _fake_summarization_pipeline,
@@ -48,10 +50,20 @@ def api_client(vector_store_with_docs, tmp_index_dir, monkeypatch):
     )
     monkeypatch.setattr(main, "settings", settings)
     monkeypatch.setattr(main, "_store", vector_store_with_docs)
+    pipeline = build_default_pipeline(vector_store_with_docs, settings)
+    monkeypatch.setattr(main, "_pipeline", pipeline)
+    case_store = CaseStore(tmp_path / "cases_api.db")
+    case_store.init_db()
+    monkeypatch.setattr(main, "_case_store", case_store)
     monkeypatch.setattr(
         main,
-        "_pipeline",
-        build_default_pipeline(vector_store_with_docs, settings),
+        "_case_service",
+        CaseInvestigationService(
+            case_store,
+            pipeline,
+            main._contextualizer,
+            settings,
+        ),
     )
     return TestClient(main.app)
 
