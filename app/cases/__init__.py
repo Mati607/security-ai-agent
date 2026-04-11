@@ -1,6 +1,7 @@
 """Investigation case management: SQLite store, timeline, and exports."""
 
 from app.cases.constants import SCHEMA_VERSION, CaseSeverity, CaseStatus, TimelineKind
+from app.cases.export_html import render_case_pack_html
 from app.cases.models import (
     CaseCreate,
     CaseDetail,
@@ -30,6 +31,7 @@ __all__ = [
     "CaseUpdate",
     "IOCAggregate",
     "NoteCreate",
+    "render_case_pack_html",
     "SearchSnapshotCreate",
     "TimelineEntry",
     "TimelineKind",
