@@ -13,11 +13,13 @@ from app.cases.models import (
     TimelineEntry,
     TriageSnapshotPayload,
 )
+from app.cases.service import CaseInvestigationService
 from app.cases.store import CaseStore, CaseStoreError
 
 __all__ = [
     "SCHEMA_VERSION",
     "CaseCreate",
+    "CaseInvestigationService",
     "CaseStore",
     "CaseStoreError",
     "CaseDetail",
