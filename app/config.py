@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     project_root: Path = Field(default_factory=lambda: Path(__file__).resolve().parents[1])
     data_dir: Path = Field(default_factory=lambda: Path("data"))
     index_dir: Path = Field(default_factory=lambda: Path("indexes/default"))
+    cases_db_path: Path = Field(
+        default_factory=lambda: Path("data/cases.db"),
+        description="SQLite database for investigation cases and timeline",
+    )
 
     # Embeddings / Vector search
     embedding_model_name: str = Field(
