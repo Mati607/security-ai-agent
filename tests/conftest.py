@@ -1,13 +1,28 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from typing import List
+from typing import Any, List
 from unittest.mock import patch
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 
+from app.cases.service import CaseInvestigationService
+from app.cases.store import CaseStore
+from app.config import Settings
 from app.indexing.vector_store import Document, VectorStore
+from app.llm.retrieval import build_default_pipeline
+
+
+def _fake_summarization_pipeline(*_args: Any, **_kwargs: Any):
+    class _Summ:
+        def __call__(self, prompt: str, **kw: Any) -> list[dict[str, str]]:
+            del prompt, kw
+            return [{"summary_text": "stub brief"}]
+
+    return _Summ()
 
 
 class _FakeSentenceTransformer:
@@ -79,4 +94,52 @@ def vector_store_with_docs(tmp_index_dir: Path) -> VectorStore:
         store = VectorStore(model_name="fake-mini", index_dir=tmp_index_dir)
         store.build_from_documents(docs)
     return store
+
+
+@pytest.fixture
+def api_client(vector_store_with_docs, tmp_index_dir, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.llm.contextualize.pipeline",
+        _fake_summarization_pipeline,
+    )
+
+    def _mock_load(cls, model_name: str, index_dir):  # noqa: ANN001
+        del cls, model_name, index_dir
+        return vector_store_with_docs
+
+    monkeypatch.setattr(
+        "app.indexing.vector_store.VectorStore.load",
+        classmethod(_mock_load),
+    )
+
+    sys.modules.pop("app.api.main", None)
+    import app.api.main as main
+
+    settings = Settings(
+        embedding_model_name="fake-mini",
+        index_dir=tmp_index_dir,
+        search_top_k=5,
+        retrieve_multiplier=2,
+        retrieve_max_candidates=50,
+        summarizer_model_name="google/flan-t5-small",
+        rerank_enabled=False,
+    )
+    monkeypatch.setattr(main, "settings", settings)
+    monkeypatch.setattr(main, "_store", vector_store_with_docs)
+    pipeline = build_default_pipeline(vector_store_with_docs, settings)
+    monkeypatch.setattr(main, "_pipeline", pipeline)
+    case_store = CaseStore(tmp_path / "cases_api.db")
+    case_store.init_db()
+    monkeypatch.setattr(main, "_case_store", case_store)
+    monkeypatch.setattr(
+        main,
+        "_case_service",
+        CaseInvestigationService(
+            case_store,
+            pipeline,
+            main._contextualizer,
+            settings,
+        ),
+    )
+    return TestClient(main.app)
 
