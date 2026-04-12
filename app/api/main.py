@@ -5,6 +5,7 @@ from typing import List
 from fastapi import FastAPI
 
 from app.api.cases_routes import create_cases_router
+from app.api.mitre_routes import create_mitre_router
 from app.api.schemas import (
     ContextRequest,
     SearchRequest,
@@ -37,6 +38,11 @@ app.include_router(
     create_cases_router(_case_store, _case_service, settings),
     prefix="/cases",
     tags=["cases"],
+)
+app.include_router(
+    create_mitre_router(_pipeline, settings),
+    prefix="/mitre",
+    tags=["mitre"],
 )
 
 
