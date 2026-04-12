@@ -67,6 +67,11 @@ class Settings(BaseSettings):
         description="Lightweight default model for on-CPU summarization",
     )
 
+    # MITRE keyword mapper (bundled catalogue; heuristic scores)
+    mitre_map_top_n: int = Field(default=12, ge=1, le=64)
+    mitre_map_min_confidence: float = Field(default=0.02, ge=0.0, le=1.0)
+    mitre_map_max_keyword_hits_per_term: int = Field(default=4, ge=1, le=32)
+
     class Config:
         env_file = ".env"
         case_sensitive = False
