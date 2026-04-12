@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import Optional
+
 from jinja2 import BaseLoader, Environment, select_autoescape
 
+from app.cases.constants import TimelineKind
 from app.cases.models import CaseDetail, IOCAggregate
+from app.mitre.models import MitreMapResult
 
 _ENV = Environment(
     loader=BaseLoader(),
@@ -76,6 +80,7 @@ _CASE_PACK_TEMPLATE = _ENV.from_string(
     .timeline-item.kind-search_snapshot { border-left-color: #6610f2; }
     .timeline-item.kind-ioc_signal { border-left-color: #fd7e14; }
     .timeline-item.kind-status_change { border-left-color: #ffc107; }
+    .timeline-item.kind-mitre_mapping { border-left-color: #e35d9f; }
     .t-head { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.25rem; }
     .t-time { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.5rem; }
     .json {
@@ -141,6 +146,39 @@ _CASE_PACK_TEMPLATE = _ENV.from_string(
     </section>
     {% endif %}
 
+    {% if mitre and mitre.hits %}
+    <section>
+      <h2>Latest MITRE mapping (heuristic)</h2>
+      <p class="meta" style="margin-bottom:0.75rem;">
+        Keyword overlap against a bundled Enterprise subset — for coverage triage, not attribution.
+      </p>
+      <div class="panel" style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Technique</th>
+              <th>Name</th>
+              <th>Tactic</th>
+              <th>Confidence</th>
+              <th>Matched terms</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in mitre.hits %}
+            <tr>
+              <td><code>{{ h.technique_id }}</code></td>
+              <td>{{ h.name }}</td>
+              <td>{{ h.tactic_name }} (<code>{{ h.tactic_id }}</code>)</td>
+              <td>{{ h.confidence | round(4) }}</td>
+              <td>{{ h.matched_keywords | join(', ') }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% endif %}
+
     <section>
       <h2>IOC rollup</h2>
       <div class="panel">
@@ -187,7 +225,21 @@ _CASE_PACK_TEMPLATE = _ENV.from_string(
 )
 
 
+def latest_mitre_mapping_from_case(detail: CaseDetail) -> Optional[MitreMapResult]:
+    """Return the most recent MITRE timeline snapshot, if any and valid."""
+
+    for entry in reversed(detail.timeline):
+        if entry.kind != TimelineKind.MITRE_MAPPING or not entry.payload:
+            continue
+        try:
+            return MitreMapResult.model_validate(entry.payload)
+        except Exception:
+            continue
+    return None
+
+
 def render_case_pack_html(detail: CaseDetail, ioc: IOCAggregate) -> str:
     """Produce a self-contained HTML document for sharing or archiving."""
 
-    return _CASE_PACK_TEMPLATE.render(detail=detail, ioc=ioc)
+    mitre = latest_mitre_mapping_from_case(detail)
+    return _CASE_PACK_TEMPLATE.render(detail=detail, ioc=ioc, mitre=mitre)
