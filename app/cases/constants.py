@@ -30,6 +30,7 @@ class TimelineKind(str, Enum):
     TRIAGE_SNAPSHOT = "triage_snapshot"
     SEARCH_SNAPSHOT = "search_snapshot"
     IOC_SIGNAL = "ioc_signal"
+    MITRE_MAPPING = "mitre_mapping"
 
 
 SCHEMA_VERSION = 1

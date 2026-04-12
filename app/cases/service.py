@@ -17,6 +17,8 @@ from app.indexing.search_filters import extract_query_signals
 from app.indexing.vector_store import Document
 from app.llm.contextualize import AlertContextualizer
 from app.llm.retrieval import RetrievalOptions, RetrievalPipeline
+from app.mitre.mapper import get_default_mapper
+from app.mitre.models import MitreMapOptions, MitreMapResult
 
 
 class CaseInvestigationService:
@@ -188,6 +190,84 @@ class CaseInvestigationService:
         full = self._store.get_case(case_id)
         assert full is not None
         return full
+
+    def attach_mitre_mapping(
+        self,
+        case_id: str,
+        result: MitreMapResult,
+        *,
+        context_doc_ids: List[str] | None = None,
+        title: str | None = None,
+    ) -> CaseDetail:
+        """Persist a MITRE heuristic mapping on the case timeline."""
+
+        if not self._store.case_exists(case_id):
+            raise CaseStoreError(f"case not found: {case_id}")
+        payload: Dict[str, Any] = result.model_dump()
+        if context_doc_ids:
+            payload["context_doc_ids"] = list(context_doc_ids)
+        n = len(result.hits)
+        snap_title = title or f"MITRE map ({n} technique{'s' if n != 1 else ''})"
+        self._store.add_timeline(
+            case_id,
+            kind=TimelineKind.MITRE_MAPPING,
+            title=snap_title,
+            body=None,
+            payload=payload,
+        )
+        full = self._store.get_case(case_id)
+        assert full is not None
+        return full
+
+    def run_mitre_map_from_text(
+        self,
+        case_id: str,
+        text: str,
+        options: MitreMapOptions | None = None,
+    ) -> tuple[MitreMapResult, CaseDetail]:
+        """Score text against the bundled ATT&CK catalogue and attach results."""
+
+        if not self._store.case_exists(case_id):
+            raise CaseStoreError(f"case not found: {case_id}")
+        mapper = get_default_mapper()
+        opts = options or MitreMapOptions(
+            top_n=self._settings.mitre_map_top_n,
+            min_confidence=self._settings.mitre_map_min_confidence,
+            max_keyword_hits_per_term=self._settings.mitre_map_max_keyword_hits_per_term,
+        )
+        result = mapper.map_text(text, options=opts)
+        detail = self.attach_mitre_mapping(case_id, result)
+        return result, detail
+
+    def run_mitre_map_from_alert_with_retrieval(
+        self,
+        case_id: str,
+        alert: str,
+        top_k: int,
+        options: RetrievalOptions | None = None,
+    ) -> tuple[MitreMapResult, List[str], CaseDetail]:
+        """Retrieve indexed context, fuse with the alert, map to MITRE, and attach."""
+
+        if not self._store.case_exists(case_id):
+            raise CaseStoreError(f"case not found: {case_id}")
+        opts = options or RetrievalOptions()
+        hits = self._pipeline.retrieve(alert, top_k=top_k, options=opts)
+        passages = [doc.text for _, doc in hits]
+        doc_ids = [doc.doc_id for _, doc in hits]
+        mapper = get_default_mapper()
+        map_opts = MitreMapOptions(
+            top_n=self._settings.mitre_map_top_n,
+            min_confidence=self._settings.mitre_map_min_confidence,
+            max_keyword_hits_per_term=self._settings.mitre_map_max_keyword_hits_per_term,
+        )
+        result = mapper.map_alert_with_hits(alert, passages, options=map_opts)
+        detail = self.attach_mitre_mapping(
+            case_id,
+            result,
+            context_doc_ids=doc_ids,
+            title="MITRE map (alert + index context)",
+        )
+        return result, doc_ids, detail
 
 
 def _hit_to_payload(score: float, doc: Document) -> Dict[str, Any]:

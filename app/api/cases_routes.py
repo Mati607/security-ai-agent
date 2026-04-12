@@ -6,7 +6,8 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from app.api.schemas import SearchRequest, TriageRequest, options_from_controls
+from app.api.mitre_routes import MitreMapRequest, mitre_options_from_request
+from app.api.schemas import ContextRequest, SearchRequest, TriageRequest, options_from_controls
 from app.cases.constants import CaseStatus
 from app.cases.export_html import render_case_pack_html
 from app.cases.models import (
@@ -123,6 +124,34 @@ def create_cases_router(
             return case_service.record_ioc_signal(case_id, title=body.title, body=body.body)
         except CaseStoreError:
             _nf()
+
+    @router.post("/{case_id}/mitre/map")
+    def case_mitre_map(case_id: str, body: MitreMapRequest) -> dict:
+        opts = mitre_options_from_request(body, settings)
+        try:
+            mitre_res, detail = case_service.run_mitre_map_from_text(case_id, body.text, opts)
+        except CaseStoreError:
+            _nf()
+        return {"mitre": mitre_res.model_dump(), "case": detail.model_dump()}
+
+    @router.post("/{case_id}/mitre/map-with-context")
+    def case_mitre_map_with_context(case_id: str, body: ContextRequest) -> dict:
+        top_k = body.top_k or settings.search_top_k
+        opts = options_from_controls(body)
+        try:
+            mitre_res, doc_ids, detail = case_service.run_mitre_map_from_alert_with_retrieval(
+                case_id,
+                body.alert,
+                top_k,
+                opts,
+            )
+        except CaseStoreError:
+            _nf()
+        return {
+            "mitre": mitre_res.model_dump(),
+            "context_doc_ids": doc_ids,
+            "case": detail.model_dump(),
+        }
 
     @router.get("/{case_id}/export.html")
     def export_case_html(case_id: str) -> HTMLResponse:
