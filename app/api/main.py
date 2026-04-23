@@ -8,6 +8,7 @@ from app.api.cases_routes import create_cases_router
 from app.api.mitre_routes import create_mitre_router
 from app.api.schemas import (
     ContextRequest,
+    IndexInfo,
     SearchRequest,
     SearchResult,
     TriageRequest,
@@ -49,6 +50,13 @@ app.include_router(
 @app.get("/healthz")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/index/info", response_model=IndexInfo)
+def index_info() -> IndexInfo:
+    """Return vector index metadata (counts, paths, embedding model)."""
+
+    return IndexInfo(**_store.index_info())
 
 
 @app.post("/search", response_model=List[SearchResult])

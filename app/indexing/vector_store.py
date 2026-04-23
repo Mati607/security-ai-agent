@@ -31,6 +31,7 @@ class VectorStore:
     def __init__(self, model_name: str, index_dir: Path) -> None:
         self.index_dir = Path(index_dir)
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        self.model_name = model_name
         self.model = SentenceTransformer(model_name)
         self.embedding_size = self.model.get_sentence_embedding_dimension()
         self.index: faiss.IndexIDMap = faiss.IndexIDMap(
@@ -116,6 +117,22 @@ class VectorStore:
         self._docs = []
         self.index = faiss.IndexIDMap(faiss.IndexFlatIP(self.embedding_size))
         self.add_documents(documents)
+
+    def index_info(self) -> Dict[str, Any]:
+        """Lightweight introspection for health dashboards and API metadata."""
+
+        n_docs = len(self._docs)
+        n_faiss = int(self.index.ntotal)
+        persisted = self.faiss_path.exists() and self.docs_path.exists()
+        return {
+            "embedding_model_name": self.model_name,
+            "embedding_dimension": self.embedding_size,
+            "document_count": n_docs,
+            "faiss_vector_total": n_faiss,
+            "index_dir": str(self.index_dir.resolve()),
+            "persisted_index_files": persisted,
+            "index_consistent": (not persisted or not n_docs) or (n_faiss == n_docs),
+        }
 
     # ------------------------------ Search ------------------------------ #
     def search_candidates(self, query: str, retrieve_k: int) -> List[Tuple[float, Document]]:

@@ -124,6 +124,7 @@ Then visit `http://localhost:8000/docs`.
 ## 🔌 API Endpoints
 
 - `GET /healthz` — health check
+- `GET /index/info` — vector index metadata (document count, embedding model, paths, consistency flags)
 - `POST /search` → `[ { score, doc_id, text, metadata } ]`  
   Optional JSON fields (all optional, backward compatible): `retrieve_k`, `filters` (metadata / score / time bounds), `use_rerank`, `narrow_by_ioc_overlap`
 - `POST /search/advanced` — same body and response as `/search` (explicit alias for tooling)

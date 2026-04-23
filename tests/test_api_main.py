@@ -9,6 +9,18 @@ def test_healthz(api_client: TestClient) -> None:
     assert r.json()["status"] == "ok"
 
 
+def test_index_info(api_client: TestClient) -> None:
+    r = api_client.get("/index/info")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["embedding_model_name"] == "fake-mini"
+    assert data["embedding_dimension"] == 8
+    assert data["document_count"] == 3
+    assert data["faiss_vector_total"] == 3
+    assert data["persisted_index_files"] is False
+    assert data["index_consistent"] is True
+
+
 def test_search_returns_hits(api_client: TestClient) -> None:
     r = api_client.post("/search", json={"query": "powershell"})
     assert r.status_code == 200

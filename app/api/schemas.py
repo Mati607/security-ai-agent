@@ -40,6 +40,18 @@ class SearchResult(BaseModel):
     metadata: dict
 
 
+class IndexInfo(BaseModel):
+    """Snapshot of the loaded FAISS index and embedding configuration."""
+
+    embedding_model_name: str
+    embedding_dimension: int
+    document_count: int
+    faiss_vector_total: int
+    index_dir: str
+    persisted_index_files: bool
+    index_consistent: bool
+
+
 class ContextRequest(RetrievalControls):
     alert: str
     top_k: int | None = Field(default=None, ge=1)
@@ -66,6 +78,7 @@ def options_from_controls(ctrl: RetrievalControls) -> RetrievalOptions:
 
 __all__ = [
     "ContextRequest",
+    "IndexInfo",
     "RetrievalControls",
     "SearchFiltersBody",
     "SearchRequest",
