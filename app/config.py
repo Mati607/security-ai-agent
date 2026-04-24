@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Auth (JWT for multi-user case access)
+    jwt_secret_key: str = Field(
+        default="dev-only-change-with-JWT_SECRET_KEY",
+        description="HS256 signing secret; MUST be overridden in production",
+    )
+    jwt_expire_minutes: int = Field(
+        default=10080,
+        ge=5,
+        description="Access token lifetime in minutes (default 7 days)",
+    )
+
     # Finetuning
     hf_token: Optional[str] = Field(default=None, description="HuggingFace token, if needed")
     llama_base_model: str = Field(

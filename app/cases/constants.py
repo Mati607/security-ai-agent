@@ -33,4 +33,4 @@ class TimelineKind(str, Enum):
     MITRE_MAPPING = "mitre_mapping"
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2

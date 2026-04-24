@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-def test_cases_crud_flow(api_client: TestClient) -> None:
+def test_cases_crud_flow(api_client: TestClient, auth_headers: dict[str, str]) -> None:
     r = api_client.post(
         "/cases",
         json={
@@ -11,56 +11,64 @@ def test_cases_crud_flow(api_client: TestClient) -> None:
             "tags": ["wmi"],
             "summary": "Parent: powershell.exe",
         },
+        headers=auth_headers,
     )
     assert r.status_code == 200
     created = r.json()
     cid = created["id"]
     assert created["title"].startswith("Suspicious")
+    assert created["user_id"] is not None
 
-    g = api_client.get(f"/cases/{cid}")
+    g = api_client.get(f"/cases/{cid}", headers=auth_headers)
     assert g.status_code == 200
     assert g.json()["id"] == cid
 
-    p = api_client.patch(f"/cases/{cid}", json={"status": "in_progress"})
+    p = api_client.patch(
+        f"/cases/{cid}",
+        json={"status": "in_progress"},
+        headers=auth_headers,
+    )
     assert p.status_code == 200
     assert p.json()["status"] == "in_progress"
 
-    lst = api_client.get("/cases?limit=10")
+    lst = api_client.get("/cases?limit=10", headers=auth_headers)
     assert lst.status_code == 200
     assert any(row["id"] == cid for row in lst.json())
 
 
-def test_cases_note_and_iocs(api_client: TestClient) -> None:
-    r = api_client.post("/cases", json={"title": "IOC rollup test"})
+def test_cases_note_and_iocs(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    r = api_client.post("/cases", json={"title": "IOC rollup test"}, headers=auth_headers)
     cid = r.json()["id"]
     n = api_client.post(
         f"/cases/{cid}/notes",
         json={"body": "C2 observed at 198.51.100.10 and evil.example.com"},
+        headers=auth_headers,
     )
     assert n.status_code == 200
-    iocs = api_client.get(f"/cases/{cid}/iocs")
+    iocs = api_client.get(f"/cases/{cid}/iocs", headers=auth_headers)
     assert iocs.status_code == 200
     data = iocs.json()
     assert "198.51.100.10" in data["ipv4"]
     assert any("evil.example.com" in d for d in data["domains"])
 
 
-def test_cases_export_html(api_client: TestClient) -> None:
-    r = api_client.post("/cases", json={"title": "HTML export"})
+def test_cases_export_html(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    r = api_client.post("/cases", json={"title": "HTML export"}, headers=auth_headers)
     cid = r.json()["id"]
-    h = api_client.get(f"/cases/{cid}/export.html")
+    h = api_client.get(f"/cases/{cid}/export.html", headers=auth_headers)
     assert h.status_code == 200
     assert "text/html" in h.headers.get("content-type", "")
     assert "HTML export" in h.text
     assert "IOC rollup" in h.text
 
 
-def test_cases_search_run_attaches_snapshot(api_client: TestClient) -> None:
-    r = api_client.post("/cases", json={"title": "Search attach"})
+def test_cases_search_run_attaches_snapshot(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    r = api_client.post("/cases", json={"title": "Search attach"}, headers=auth_headers)
     cid = r.json()["id"]
     sr = api_client.post(
         f"/cases/{cid}/snapshots/search-run",
         json={"query": "powershell suspicious", "top_k": 3},
+        headers=auth_headers,
     )
     assert sr.status_code == 200
     detail = sr.json()
@@ -68,13 +76,13 @@ def test_cases_search_run_attaches_snapshot(api_client: TestClient) -> None:
     assert "search_snapshot" in kinds
 
 
-def test_cases_triage_snapshot(api_client: TestClient) -> None:
-    r = api_client.post("/cases", json={"title": "Triage attach"})
+def test_cases_triage_snapshot(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    r = api_client.post("/cases", json={"title": "Triage attach"}, headers=auth_headers)
     cid = r.json()["id"]
     tr = api_client.post(
         f"/cases/{cid}/snapshots/triage",
         json={"alert": "encoded powershell beacon"},
-        headers={"content-type": "application/json"},
+        headers={**auth_headers, "content-type": "application/json"},
     )
     assert tr.status_code == 200
     body = tr.json()
@@ -82,5 +90,10 @@ def test_cases_triage_snapshot(api_client: TestClient) -> None:
     assert body["case"]["timeline"]
 
 
-def test_cases_404(api_client: TestClient) -> None:
-    assert api_client.get("/cases/not-a-real-id").status_code == 404
+def test_cases_404(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    assert api_client.get("/cases/not-a-real-id", headers=auth_headers).status_code == 404
+
+
+def test_cases_require_auth(api_client: TestClient) -> None:
+    assert api_client.get("/cases").status_code == 401
+    assert api_client.post("/cases", json={"title": "x"}).status_code == 401

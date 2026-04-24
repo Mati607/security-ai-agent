@@ -84,3 +84,16 @@ def test_delete_case_cascades_timeline(case_store: CaseStore) -> None:
     case_store.add_timeline(d.id, kind=TimelineKind.NOTE, body="x")
     assert case_store.delete_case(d.id) is True
     assert case_store.get_case(d.id) is None
+
+
+def test_list_cases_scoped_by_user_id(case_store: CaseStore) -> None:
+    u1 = case_store.create_user("alpha", "password11!")
+    u2 = case_store.create_user("bravo", "password11!")
+    c1 = case_store.create_case(CaseCreate(title="Alpha case"), user_id=u1.id)
+    c2 = case_store.create_case(CaseCreate(title="Bravo case"), user_id=u2.id)
+    only_u1 = case_store.list_cases(CaseListParams(user_id=u1.id, limit=20))
+    assert {r.id for r in only_u1} == {c1.id}
+    only_u2 = case_store.list_cases(CaseListParams(user_id=u2.id, limit=20))
+    assert {r.id for r in only_u2} == {c2.id}
+    assert c1.user_id == u1.id
+    assert c2.user_id == u2.id

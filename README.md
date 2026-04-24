@@ -125,6 +125,8 @@ Then visit `http://localhost:8000/docs`.
 
 - `GET /healthz` — health check
 - `GET /index/info` — vector index metadata (document count, embedding model, paths, consistency flags)
+- **Auth** (JWT, shared SQLite with cases): `POST /auth/register` (JSON username/password), `POST /auth/token` (OAuth2 password form, same as `curl -d username=...&password=...`), `GET /auth/me` (Bearer token). Set **`JWT_SECRET_KEY`** in production.
+- **Cases** (`/cases/...`) require `Authorization: Bearer <access_token>`; each user only sees and mutates cases they created.
 - `POST /search` → `[ { score, doc_id, text, metadata } ]`  
   Optional JSON fields (all optional, backward compatible): `retrieve_k`, `filters` (metadata / score / time bounds), `use_rerank`, `narrow_by_ioc_overlap`
 - `POST /search/advanced` — same body and response as `/search` (explicit alias for tooling)
@@ -139,6 +141,7 @@ Override via env vars or `.env` file.
 - **Embeddings**: `embedding_model_name`, `search_top_k`
 - **Retrieval**: `retrieve_multiplier`, `retrieve_max_candidates`, `rerank_enabled`, `rerank_model_name`
 - **API**: `api_host`, `api_port`
+- **Auth**: `jwt_secret_key`, `jwt_expire_minutes` (also `JWT_SECRET_KEY` / `JWT_EXPIRE_MINUTES` via env)
 - **Contextualizer**: `summarizer_model_name`
 - **Finetune**: `llama_base_model`, `lora_output_dir`, `hf_token`
 

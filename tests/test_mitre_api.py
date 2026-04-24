@@ -37,12 +37,13 @@ def test_mitre_map_with_context(api_client: TestClient) -> None:
     assert isinstance(hits, list)
 
 
-def test_case_mitre_map_persists_timeline(api_client: TestClient) -> None:
-    c = api_client.post("/cases", json={"title": "MITRE case"})
+def test_case_mitre_map_persists_timeline(api_client: TestClient, auth_headers: dict[str, str]) -> None:
+    c = api_client.post("/cases", json={"title": "MITRE case"}, headers=auth_headers)
     cid = c.json()["id"]
     r = api_client.post(
         f"/cases/{cid}/mitre/map",
         json={"text": "kerberoast against service accounts then golden ticket"},
+        headers=auth_headers,
     )
     assert r.status_code == 200
     payload = r.json()

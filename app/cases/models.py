@@ -57,6 +57,7 @@ class CaseSummary(BaseModel):
     status: CaseStatus
     severity: Optional[CaseSeverity] = None
     owner: Optional[str] = None
+    user_id: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -83,6 +84,7 @@ class CaseDetail(BaseModel):
     status: CaseStatus
     severity: Optional[CaseSeverity] = None
     owner: Optional[str] = None
+    user_id: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     summary: Optional[str] = None
     external_refs: Dict[str, str] = Field(default_factory=dict)
@@ -123,6 +125,7 @@ class CaseListParams(BaseModel):
 
     status: Optional[CaseStatus] = None
     owner: Optional[str] = None
+    user_id: Optional[str] = None
     title_contains: Optional[str] = Field(default=None, max_length=256)
     limit: int = Field(default=50, ge=1, le=500)
     offset: int = Field(default=0, ge=0)

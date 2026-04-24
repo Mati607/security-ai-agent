@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, List
 from unittest.mock import patch
@@ -142,4 +143,22 @@ def api_client(vector_store_with_docs, tmp_index_dir, tmp_path, monkeypatch):
         ),
     )
     return TestClient(main.app)
+
+
+@pytest.fixture
+def auth_headers(api_client: TestClient) -> dict[str, str]:
+    """Bearer token for a freshly registered analyst (per test client / DB)."""
+
+    uname = f"analyst_{uuid.uuid4().hex[:10]}"
+    pw = "SecurePass1!"
+    r = api_client.post("/auth/register", json={"username": uname, "password": pw})
+    assert r.status_code == 201, r.text
+    r2 = api_client.post(
+        "/auth/token",
+        data={"username": uname, "password": pw},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert r2.status_code == 200, r2.text
+    token = r2.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 

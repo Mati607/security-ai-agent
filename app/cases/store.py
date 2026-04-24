@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from app.auth.models import UserPublic
+from app.auth.passwords import hash_password, verify_password
 from app.cases.constants import SCHEMA_VERSION, CaseSeverity, CaseStatus, TimelineKind
 from app.cases.models import (
     CaseCreate,
@@ -63,10 +65,19 @@ class CaseStore:
             conn.close()
 
     def init_db(self) -> None:
-        """Create tables and metadata if missing."""
+        """Create tables and metadata if missing.
+
+        Runs the full DDL script only when ``cases_meta`` is absent (brand-new DB).
+        Existing databases rely on ``schema_version`` in ``cases_meta`` and forward
+        migrations so we never re-apply ``CREATE INDEX`` against legacy tables.
+        """
 
         with self._connect() as conn:
-            conn.executescript(DDL_INITIAL)
+            has_meta = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cases_meta'",
+            ).fetchone()
+            if has_meta is None:
+                conn.executescript(DDL_INITIAL)
             row = conn.execute(
                 "SELECT value FROM cases_meta WHERE key = ?",
                 ("schema_version",),
@@ -86,13 +97,92 @@ class CaseStore:
 
         if from_version < 1:
             raise CaseStoreError(f"Unsupported schema version {from_version}")
-        # Placeholder for future migrations; bump SCHEMA_VERSION when adding DDL.
+        if from_version < 2:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    username TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    display_name TEXT,
+                    created_at TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1
+                );
+                CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+                """
+            )
+            cols = {col[1] for col in conn.execute("PRAGMA table_info(cases)").fetchall()}
+            if "user_id" not in cols:
+                conn.execute("ALTER TABLE cases ADD COLUMN user_id TEXT REFERENCES users(id)")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cases_user_updated ON cases (user_id, updated_at DESC)"
+            )
         conn.execute(
             "UPDATE cases_meta SET value = ? WHERE key = ?",
             (str(SCHEMA_VERSION), "schema_version"),
         )
 
-    def create_case(self, data: CaseCreate) -> CaseDetail:
+    def create_user(
+        self,
+        username: str,
+        password_plain: str,
+        display_name: Optional[str] = None,
+    ) -> UserPublic:
+        uid = uuid.uuid4().hex
+        now = _utc_now_iso()
+        uname = username.strip().lower()
+        disp = display_name.strip() if display_name and display_name.strip() else None
+        ph = hash_password(password_plain)
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users (id, username, password_hash, display_name, created_at, is_active)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    """,
+                    (uid, uname, ph, disp, now),
+                )
+        except sqlite3.IntegrityError as e:
+            raise CaseStoreError("username already registered") from e
+        u = self.get_user_public(uid)
+        assert u is not None
+        return u
+
+    def get_user_public(self, user_id: str) -> Optional[UserPublic]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT id, username, display_name, is_active FROM users WHERE id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None or not int(row["is_active"]):
+            return None
+        return UserPublic(
+            id=str(row["id"]),
+            username=str(row["username"]),
+            display_name=row["display_name"],
+        )
+
+    def authenticate_user(self, username: str, password_plain: str) -> Optional[UserPublic]:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id, username, display_name, password_hash, is_active
+                FROM users
+                WHERE lower(username) = lower(?)
+                """,
+                (username.strip(),),
+            ).fetchone()
+        if row is None or not int(row["is_active"]):
+            return None
+        if not verify_password(password_plain, str(row["password_hash"])):
+            return None
+        return UserPublic(
+            id=str(row["id"]),
+            username=str(row["username"]),
+            display_name=row["display_name"],
+        )
+
+    def create_case(self, data: CaseCreate, user_id: Optional[str] = None) -> CaseDetail:
         case_id = uuid.uuid4().hex
         now = _utc_now_iso()
         tags = _json_dumps(list(data.tags))
@@ -102,9 +192,9 @@ class CaseStore:
             conn.execute(
                 """
                 INSERT INTO cases (
-                    id, title, status, severity, owner, tags_json, summary,
+                    id, title, status, severity, owner, user_id, tags_json, summary,
                     external_refs_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     case_id,
@@ -112,6 +202,7 @@ class CaseStore:
                     data.status.value,
                     data.severity.value if data.severity else None,
                     data.owner.strip() if data.owner else None,
+                    user_id,
                     tags,
                     data.summary,
                     ext,
@@ -176,12 +267,14 @@ class CaseStore:
             )
 
         sev = row["severity"]
+        uid = row["user_id"] if "user_id" in row.keys() else None
         return CaseDetail(
             id=str(row["id"]),
             title=str(row["title"]),
             status=CaseStatus(str(row["status"])),
             severity=CaseSeverity(str(sev)) if sev else None,
             owner=row["owner"],
+            user_id=str(uid) if uid else None,
             tags=[str(t) for t in tags],
             summary=row["summary"],
             external_refs={str(k): str(v) for k, v in ext.items()},
@@ -202,6 +295,9 @@ class CaseStore:
         if params.title_contains:
             where.append("c.title LIKE ?")
             bind.append(f"%{params.title_contains.strip()}%")
+        if params.user_id is not None:
+            where.append("c.user_id = ?")
+            bind.append(params.user_id)
 
         sql = f"""
             SELECT
@@ -223,6 +319,7 @@ class CaseStore:
             if not isinstance(tags, list):
                 tags = []
             sev = row["severity"]
+            uid = row["user_id"] if "user_id" in row.keys() else None
             out.append(
                 CaseSummary(
                     id=str(row["id"]),
@@ -230,6 +327,7 @@ class CaseStore:
                     status=CaseStatus(str(row["status"])),
                     severity=CaseSeverity(str(sev)) if sev else None,
                     owner=row["owner"],
+                    user_id=str(uid) if uid else None,
                     tags=[str(t) for t in tags],
                     created_at=str(row["created_at"]),
                     updated_at=str(row["updated_at"]),

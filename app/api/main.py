@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI
 
+from app.api.auth_routes import create_auth_router
 from app.api.cases_routes import create_cases_router
 from app.api.mitre_routes import create_mitre_router
+from app.auth.deps import build_get_current_user
 from app.api.schemas import (
     ContextRequest,
     IndexInfo,
@@ -21,22 +24,37 @@ from app.indexing.vector_store import VectorStore
 from app.llm.contextualize import AlertContextualizer
 from app.llm.retrieval import build_default_pipeline
 
-app = FastAPI(title="AI-Driven SOC API")
 settings = get_settings()
 _store = VectorStore.load(model_name=settings.embedding_model_name, index_dir=settings.index_dir)
 _pipeline = build_default_pipeline(_store, settings)
 _contextualizer = AlertContextualizer(model_name=settings.summarizer_model_name)
 
 _case_store = CaseStore(settings.cases_db_path)
-_case_store.init_db()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Initialize SQLite schema on the active case store (supports test overrides)."""
+
+    _case_store.init_db()
+    yield
+
+
+app = FastAPI(title="AI-Driven SOC API", lifespan=_lifespan)
 _case_service = CaseInvestigationService(
     _case_store,
     _pipeline,
     _contextualizer,
     settings,
 )
+_get_current_user = build_get_current_user(lambda: _case_store, settings)
 app.include_router(
-    create_cases_router(_case_store, _case_service, settings),
+    create_auth_router(lambda: _case_store, settings, _get_current_user),
+    prefix="/auth",
+    tags=["auth"],
+)
+app.include_router(
+    create_cases_router(lambda: _case_store, lambda: _case_service, settings, _get_current_user),
     prefix="/cases",
     tags=["cases"],
 )
